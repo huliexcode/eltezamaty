@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>متتبع المصروفات والاشتراكات الذكي</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Cairo', 'sans-serif'],
+                    },
+                    colors: {
+                        dark: '#0f172a',
+                        darker: '#020617',
+                        primary: '#3b82f6',
+                        secondary: '#8b5cf6',
+                        accent: '#10b981'
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            font-family: 'Cairo', sans-serif;
+            background-color: #020617;
+            color: #f8fafc;
+            overflow: hidden; /* Prevent scrolling for app-like feel */
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        .glass-panel {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .bubble-glow {
+            box-shadow: 0 0 25px rgba(59, 130, 246, 0.5), inset 0 0 15px rgba(255,255,255,0.2);
+        }
+
+        .bubble-node {
+            transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+            position: absolute;
+            transform: translate(-50%, -50%);
+        }
+        
+        .bubble-enter {
+            opacity: 0;
+            transform: translate(-50%, -50%) scale(0);
+        }
+        
+        .bubble-enter-active {
+            opacity: 1;
+            transform: translate(-50%, -50%) scale(1);
+        }
+
+        /* Numpad styles */
+        .numpad-btn {
+            background: rgba(255,255,255,0.05);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+        .numpad-btn:active {
+            background: rgba(255,255,255,0.2);
+            transform: scale(0.95);
+        }
+
+        .gradient-text {
+            background: linear-gradient(to right, #60a5fa, #a78bfa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .app-container {
+            max-width: 480px;
+            margin: 0 auto;
+            height: 100vh;
+            height: 100dvh;
+            position: relative;
+            background: radial-gradient(circle at top right, #1e1b4b, #020617);
+        }
+        
+        /* Hide scrollbar */
+        ::-webkit-scrollbar { width: 0px; background: transparent; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useMemo } = React;
+
+        // --- Data Structure ---
+        const categoryTree = {
+            id: 'root',
+            label: 'إضافة مبلغ',
+            icon: 'fa-plus',
+            color: 'from-blue-500 to-indigo-600',
+            children: [
+                {
+                    id: 'subscriptions',
+                    label: 'اشتراكات',
+                    icon: 'fa-sync',
+                    color: 'from-purple-500 to-pink-600',
+                    children: [
+                        { id: 'netflix', label: 'نتفلكس', icon: 'fa-film', isLeaf: true, color: 'from-red-500 to-red-700' },
+                        { id: 'youtube', label: 'يوتيوب', icon: 'fa-youtube', isLeaf: true, color: 'from-red-400 to-red-600' },
+                        { id: 'chatgpt', label: 'ChatGPT', icon: 'fa-robot', isLeaf: true, color: 'from-emerald-400 to-emerald-600' },
+                        { id: 'gemini', label: 'Gemini', icon: 'fa-brain', isLeaf: true, color: 'from-blue-400 to-indigo-500' },
+                        { id: 'claude', label: 'Claude', icon: 'fa-comment', isLeaf: true, color: 'from-orange-400 to-orange-600' }
+                    ]
+                },
+                {
+                    id: 'home',
+                    label: 'المنزل',
+                    icon: 'fa-home',
+                    color: 'from-emerald-500 to-teal-600',
+                    children: [
+                        { id: 'rent', label: 'الإيجار', icon: 'fa-key', isLeaf: true, color: 'from-emerald-400 to-green-600' },
+                        { id: 'maintenance', label: 'صيانة', icon: 'fa-tools', isLeaf: true, color: 'from-gray-400 to-gray-600' },
+                        { id: 'furniture', label: 'أثاث', icon: 'fa-couch', isLeaf: true, color: 'from-yellow-400 to-yellow-600' }
+                    ]
+                },
+                {
+                    id: 'utilities',
+                    label: 'الكهرباء والخدمات',
+                    icon: 'fa-bolt',
+                    color: 'from-yellow-400 to-orange-500',
+                    children: [
+                        { id: 'electricity', label: 'الكهرباء', icon: 'fa-plug', isLeaf: true, color: 'from-yellow-300 to-yellow-500' },
+                        { id: 'water', label: 'المياه', icon: 'fa-tint', isLeaf: true, color: 'from-blue-300 to-blue-500' },
+                        { id: 'internet', label: 'الإنترنت', icon: 'fa-wifi', isLeaf: true, color: 'from-indigo-400 to-indigo-600' }
+                    ]
+                },
+                { id: 'savings', label: 'المدخرات', icon: 'fa-piggy-bank', isLeaf: true, color: 'from-green-400 to-emerald-600' },
+                { id: 'groceries', label: 'المقاضي', icon: 'fa-shopping-cart', isLeaf: true, color: 'from-orange-400 to-red-500' },
+                { id: 'transport', label: 'المواصلات', icon: 'fa-car', isLeaf: true, color: 'from-gray-400 to-gray-600' }
+            ]
+        };
+
+        // --- Helper Functions ---
+        const findNodeById = (node, id) => {
+            if (node.id === id) return node;
+            if (node.children) {
+                for (let child of node.children) {
+                    const found = findNodeById(child, id);
+                    if (found) return found;
+                }
+            }
+            return null;
+        };
+
+        const getParentId = (root, targetId, parentId = null) => {
+            if (root.id === targetId) return parentId;
+            if (root.children) {
+                for (let child of root.children) {
+                    const found = getParentId(child, targetId, root.id);
+                    if (found) return found;
+                }
+            }
+            return null;
+        };
+
+        // --- Components ---
+
+        const LoginScreen = ({ onLogin }) => {
+            const [pin, setPin] = useState('');
+            const [error, setError] = useState(false);
+
+            const handleNumClick = (num) => {
+                if (pin.length < 4) {
+                    setPin(prev => prev + num);
+                    setError(false);
+                }
+            };
+
+            useEffect(() => {
+                if (pin.length === 4) {
+                    if (pin === '1234') { // Dummy password for demo
+                        setTimeout(onLogin, 300);
+                    } else {
+                        setError(true);
+                        setTimeout(() => setPin(''), 500);
+                    }
+                }
+            }, [pin]);
+
+            return (
+                <div className="flex flex-col items-center justify-center h-full px-6 relative z-10">
+                    <div className="mb-10 text-center">
+                        <div className="w-20 h-20 bg-gradient-to-tr from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-[0_0_30px_rgba(139,92,246,0.4)]">
+                            <i className="fa-solid fa-wallet text-4xl text-white"></i>
+                        </div>
+                        <h1 className="text-3xl font-bold mb-2">مرحباً بك</h1>
+                        <p className="text-gray-400">أدخل الرمز السري للمتابعة (1234)</p>
+                    </div>
+
+                    <div className="flex gap-4 mb-10 dir-ltr">
+                        {[0, 1, 2, 3].map(i => (
+                            <div key={i} className={`w-4 h-4 rounded-full border-2 transition-all ${pin.length > i ? 'bg-white border-white' : 'border-gray-500'} ${error ? 'bg-red-500 border-red-500' : ''}`}></div>
+                        ))}
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-6 w-full max-w-[280px] dir-ltr">
+                        {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(num => (
+                            <button key={num} onClick={() => handleNumClick(num.toString())} className="w-16 h-16 numpad-btn mx-auto">
+                                {num}
+                            </button>
+                        ))}
+                        <div></div>
+                        <button onClick={() => handleNumClick('0')} className="w-16 h-16 numpad-btn mx-auto">0</button>
+                        <button onClick={() => setPin(prev => prev.slice(0, -1))} className="w-16 h-16 numpad-btn mx-auto text-xl">
+                            <i className="fa-solid fa-delete-left"></i>
+                        </button>
+                    </div>
+                </div>
+            );
+        };
+
+        const NumpadModal = ({ isOpen, onClose, onConfirm }) => {
+            const [amount, setAmount] = useState('0');
+
+            if (!isOpen) return null;
+
+            const handlePress = (val) => {
+                if (val === 'clear') setAmount('0');
+                else if (val === 'back') setAmount(prev => prev.length > 1 ? prev.slice(0, -1) : '0');
+                else setAmount(prev => prev === '0' ? val : prev + val);
+            };
+
+            return (
+                <div className="absolute inset-0 z-50 flex items-end justify-center pb-0 bg-black/60 backdrop-blur-sm transition-all duration-300">
+                    <div className="glass-panel w-full rounded-t-3xl p-6 pt-8 animate-[slideUp_0.3s_ease-out]">
+                        <div className="text-center mb-6">
+                            <p className="text-gray-400 text-sm mb-1">المبلغ الإجمالي</p>
+                            <div className="text-5xl font-bold text-white flex items-center justify-center gap-2">
+                                <span>{amount}</span>
+                                <span className="text-2xl text-gray-500">SAR</span>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-4 mb-6 dir-ltr">
+                            {['1','2','3','4','5','6','7','8','9','.','0','back'].map(btn => (
+                                <button key={btn} onClick={() => handlePress(btn)} className="h-14 numpad-btn mx-auto w-full max-w-[80px] text-xl">
+                                    {btn === 'back' ? <i className="fa-solid fa-delete-left"></i> : btn}
+                                </button>
+                            ))}
+                        </div>
+
+                        <div className="flex gap-4">
+                            <button onClick={onClose} className="flex-1 py-4 rounded-xl font-bold bg-gray-700/50 hover:bg-gray-700 transition-colors">
+                                إلغاء
+                            </button>
+                            <button onClick={() => onConfirm(amount)} className="flex-1 py-4 rounded-xl font-bold bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-400 hover:to-indigo-500 transition-colors text-white shadow-lg shadow-blue-500/30">
+                                تأكيد
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const SetupLeafModal = ({ isOpen, node, amount, onClose, onSave }) => {
+            const [isRecurring, setIsRecurring] = useState(true);
+            const [date, setDate] = useState('');
+
+            useEffect(() => {
+                if (isOpen) {
+                    const tmr = new Date();
+                    tmr.setDate(tmr.getDate() + 1);
+                    setDate(tmr.toISOString().split('T')[0]);
+                    // Auto suggest recurring if it's under subscriptions
+                    setIsRecurring(node?.id !== 'groceries' && node?.id !== 'transport');
+                }
+            }, [isOpen, node]);
+
+            if (!isOpen || !node) return null;
+
+            return (
+                <div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+                    <div className="glass-panel w-full max-w-sm rounded-3xl p-6 shadow-2xl border border-gray-600/50">
+                        <div className="flex items-center gap-4 mb-6">
+                            <div className={`w-12 h-12 rounded-full flex items-center justify-center bg-gradient-to-br ${node.color || 'from-gray-500 to-gray-700'} text-xl`}>
+                                <i className={`fa-solid ${node.icon}`}></i>
+                            </div>
+                            <div>
+                                <h3 className="text-xl font-bold">{node.label}</h3>
+                                <p className="text-gray-400 text-sm">{amount} ريال</p>
+                            </div>
+                        </div>
+
+                        <div className="space-y-5">
+                            <div>
+                                <label className="block text-sm text-gray-400 mb-2">تاريخ الاستحقاق / الدفع</label>
+                                <input type="date" value={date} onChange={(e) => setDate(e.target.value)} 
+                                    className="w-full bg-darker/50 border border-gray-600 rounded-xl p-3 text-white focus:outline-none focus:border-primary" />
+                            </div>
+
+                            <div className="flex items-center justify-between bg-darker/30 p-3 rounded-xl border border-gray-700/50">
+                                <div>
+                                    <h4 className="font-semibold">دفع متكرر؟</h4>
+                                    <p className="text-xs text-gray-400">تجديد شهري وتنبيهات</p>
+                                </div>
+                                <button onClick={() => setIsRecurring(!isRecurring)} 
+                                    className={`w-12 h-6 rounded-full transition-colors relative ${isRecurring ? 'bg-primary' : 'bg-gray-600'}`}>
+                                    <span className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${isRecurring ? 'left-1' : 'right-1'}`}></span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="flex gap-3 mt-8">
+                            <button onClick={onClose} className="flex-1 py-3 rounded-xl bg-gray-700/50">إلغاء</button>
+                            <button onClick={() => onSave({ node, amount, date, isRecurring })} className="flex-1 py-3 rounded-xl bg-accent text-white font-bold shadow-lg shadow-accent/30">حفظ وتثبيت</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const BubbleMap = ({ currentId, amount, onNodeClick, onBackClick }) => {
+            const containerRef = useRef(null);
+            const currentNode = findNodeById(categoryTree, currentId);
+            const parentId = getParentId(categoryTree, currentId);
+            
+            // Layout calculations
+            const centerSize = 120;
+            const childSize = 80;
+            const radius = 130; // Distance from center
+
+            const children = currentNode?.children || [];
+            
+            return (
+                <div className="relative w-full h-[60vh] flex items-center justify-center overflow-hidden" ref={containerRef}>
+                    {/* Back Button if not root */}
+                    {parentId && (
+                        <button onClick={() => onBackClick(parentId)} className="absolute top-4 right-4 w-10 h-10 rounded-full bg-gray-800/80 flex items-center justify-center z-20 shadow-lg border border-gray-700">
+                            <i className="fa-solid fa-arrow-right text-gray-300"></i>
+                        </button>
+                    )}
+
+                    {/* Connecting Lines */}
+                    {amount > 0 && children.map((child, index) => {
+                        const angle = (index / children.length) * (2 * Math.PI) - (Math.PI / 2);
+                        const x = Math.cos(angle) * radius;
+                        const y = Math.sin(angle) * radius;
+                        
+                        return (
+                            <svg key={`line-${child.id}`} className="absolute inset-0 w-full h-full pointer-events-none z-0">
+                                <line 
+                                    x1="50%" y1="50%" 
+                                    x2={`calc(50% + ${x}px)`} y2={`calc(50% + ${y}px)`} 
+                                    stroke="rgba(255,255,255,0.15)" strokeWidth="2" strokeDasharray="4 4"
+                                />
+                            </svg>
+                        );
+                    })}
+
+                    {/* Central Bubble */}
+                    <div className="absolute left-1/2 top-1/2 z-10 bubble-node" style={{width: centerSize, height: centerSize}}>
+                        <button 
+                            onClick={() => amount === 0 ? onNodeClick(currentNode) : null}
+                            className={`w-full h-full rounded-full flex flex-col items-center justify-center bg-gradient-to-br ${currentNode.color || 'from-gray-700 to-gray-900'} bubble-glow border-2 border-white/20`}
+                        >
+                            <i className={`fa-solid ${currentNode.icon} text-3xl mb-1`}></i>
+                            <span className="font-bold text-sm text-center px-1 leading-tight">{currentNode.label}</span>
+                            {amount > 0 && currentId === 'root' && (
+                                <span className="text-xs bg-black/50 px-2 py-0.5 rounded-full mt-1">{amount} SAR</span>
+                            )}
+                        </button>
+                    </div>
+
+                    {/* Child Bubbles */}
+                    {amount > 0 && children.map((child, index) => {
+                        const angle = (index / children.length) * (2 * Math.PI) - (Math.PI / 2);
+                        const x = Math.cos(angle) * radius;
+                        const y = Math.sin(angle) * radius;
+                        
+                        return (
+                            <div key={child.id} className="absolute left-1/2 top-1/2 z-10 bubble-node bubble-enter-active" 
+                                style={{
+                                    width: childSize, height: childSize,
+                                    transform: `translate(calc(-50% + ${x}px), calc(-50% + ${y}px))`
+                                }}
+                            >
+                                <button 
+                                    onClick={() => onNodeClick(child)}
+                                    className={`w-full h-full rounded-full flex flex-col items-center justify-center bg-gradient-to-br ${child.color || 'from-gray-600 to-gray-800'} shadow-lg border border-white/10 hover:scale-105 transition-transform`}
+                                >
+                                    <i className={`fa-solid ${child.icon} text-xl mb-1`}></i>
+                                    <span className="text-xs font-semibold text-center px-1 leading-tight">{child.label}</span>
+                                </button>
+                            </div>
+                        );
+                    })}
+                </div>
+            );
+        };
+
+        const SubscriptionsList = ({ expenses }) => {
+            const [now, setNow] = useState(new Date());
+
+            useEffect(() => {
+                const timer = setInterval(() => setNow(new Date()), 1000);
+                return () => clearInterval(timer);
+            }, []);
+
+            const formatCountdown = (targetDateStr) => {
+                const target = new Date(targetDateStr).getTime();
+                const diff = target - now.getTime();
+                
+                if (diff <= 0) return { text: "مستحق الآن!", color: "text-red-400", urgent: true };
+
+                const d = Math.floor(diff / (1000 * 60 * 60 * 24));
+                const h = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+                const s = Math.floor((diff % (1000 * 60)) / 1000);
+
+                if (d > 0) return { text: `${d} يوم و ${h} ساعة`, color: "text-green-400", urgent: d < 3 };
+                return { text: `${h}:${m < 10 ? '0'+m : m}:${s < 10 ? '0'+s : s}`, color: "text-orange-400", urgent: true };
+            };
+
+            const recurring = expenses.filter(e => e.isRecurring).sort((a,b) => new Date(a.date) - new Date(b.date));
+
+            if (recurring.length === 0) {
+                return (
+                    <div className="flex flex-col items-center justify-center h-[60vh] text-gray-500">
+                        <i className="fa-solid fa-calendar-check text-5xl mb-4 opacity-50"></i>
+                        <p>لا توجد اشتراكات مجدولة</p>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="p-4 h-[75vh] overflow-y-auto pb-24">
+                    <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
+                        <i className="fa-solid fa-clock text-primary"></i> التنبيهات الزمنية
+                    </h2>
+                    <div className="space-y-4">
+                        {recurring.map(exp => {
+                            const cd = formatCountdown(exp.date);
+                            return (
+                                <div key={exp.id} className="glass-panel p-4 rounded-2xl flex items-center relative overflow-hidden">
+                                    {cd.urgent && <div className="absolute top-0 right-0 w-1 h-full bg-red-500 animate-pulse"></div>}
+                                    <div className={`w-12 h-12 rounded-full flex flex-shrink-0 items-center justify-center bg-gradient-to-br ${exp.node.color} mr-4 ml-4`}>
+                                        <i className={`fa-solid ${exp.node.icon} text-xl`}></i>
+                                    </div>
+                                    <div className="flex-1">
+                                        <h3 className="font-bold text-lg">{exp.node.label}</h3>
+                                        <div className="flex items-center justify-between mt-1">
+                                            <span className="text-gray-300 font-semibold">{exp.amount} SAR</span>
+                                            <div className={`text-sm font-bold flex items-center gap-1 ${cd.color}`}>
+                                                <i className="fa-regular fa-clock"></i>
+                                                <span className="dir-ltr inline-block">{cd.text}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )
+                        })}
+                    </div>
+                </div>
+            );
+        };
+
+        const App = () => {
+            const [isAuthenticated, setIsAuthenticated] = useState(false);
+            const [view, setView] = useState('bubbles'); // bubbles | list
+            
+            // Bubble State
+            const [currentId, setCurrentId] = useState('root');
+            const [amount, setAmount] = useState(0);
+            
+            // Modals
+            const [showNumpad, setShowNumpad] = useState(false);
+            const [setupNode, setSetupNode] = useState(null); // Node selected for final setup
+            
+            // Data
+            const [expenses, setExpenses] = useState(() => {
+                // Initial dummy data to show the timer feature
+                const tmr = new Date(); tmr.setDate(tmr.getDate() + 2);
+                const hrs = new Date(); hrs.setHours(hrs.getHours() + 5);
+                return [
+                    { id: '1', node: { id: 'netflix', label: 'نتفلكس', icon: 'fa-film', color: 'from-red-500 to-red-700' }, amount: '65', date: tmr.toISOString(), isRecurring: true },
+                    { id: '2', node: { id: 'electricity', label: 'الكهرباء', icon: 'fa-plug', color: 'from-yellow-400 to-yellow-600' }, amount: '350', date: hrs.toISOString(), isRecurring: true }
+                ];
+            });
+
+            // Handlers
+            const handleNodeClick = (node) => {
+                if (node.id === 'root' && amount === 0) {
+                    setShowNumpad(true);
+                    return;
+                }
+                
+                if (node.isLeaf) {
+                    setSetupNode(node);
+                } else {
+                    setCurrentId(node.id);
+                }
+            };
+
+            const handleNumpadConfirm = (val) => {
+                setAmount(Number(val));
+                setShowNumpad(false);
+            };
+
+            const handleSaveExpense = (data) => {
+                const newExp = {
+                    id: Date.now().toString(),
+                    ...data
+                };
+                setExpenses(prev => [...prev, newExp]);
+                
+                // Reset state
+                setSetupNode(null);
+                setAmount(0);
+                setCurrentId('root');
+                
+                // Show a small non-intrusive success indicator (omitted for brevity, UI changes immediately)
+                setView('list'); // Switch to list to see it
+            };
+
+            // Custom styles for slide animation
+            useEffect(() => {
+                const style = document.createElement('style');
+                style.textContent = `
+                    @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+                `;
+                document.head.appendChild(style);
+                return () => document.head.removeChild(style);
+            }, []);
+
+
+            if (!isAuthenticated) {
+                return (
+                    <div className="app-container">
+                        <LoginScreen onLogin={() => setIsAuthenticated(true)} />
+                    </div>
+                );
+            }
+
+            return (
+                <div className="app-container flex flex-col">
+                    {/* Header Tabs */}
+                    <div className="flex p-4 gap-2 z-20">
+                        <button onClick={() => setView('bubbles')} 
+                            className={`flex-1 py-3 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all ${view === 'bubbles' ? 'bg-primary text-white shadow-[0_4px_20px_rgba(59,130,246,0.4)]' : 'glass-panel text-gray-400'}`}>
+                            <i className="fa-solid fa-network-wired"></i> المسار
+                        </button>
+                        <button onClick={() => setView('list')} 
+                            className={`flex-1 py-3 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all ${view === 'list' ? 'bg-secondary text-white shadow-[0_4px_20px_rgba(139,92,246,0.4)]' : 'glass-panel text-gray-400'}`}>
+                            <i className="fa-regular fa-bell"></i> التنبيهات
+                            {expenses.length > 0 && (
+                                <span className="bg-red-500 text-xs px-2 py-0.5 rounded-full">{expenses.length}</span>
+                            )}
+                        </button>
+                    </div>
+
+                    {/* Main Content Area */}
+                    <div className="flex-1 relative">
+                        {view === 'bubbles' ? (
+                            <BubbleMap 
+                                currentId={currentId} 
+                                amount={amount} 
+                                onNodeClick={handleNodeClick}
+                                onBackClick={(pid) => setCurrentId(pid)}
+                            />
+                        ) : (
+                            <SubscriptionsList expenses={expenses} />
+                        )}
+                    </div>
+
+                    {/* Modals */}
+                    <NumpadModal 
+                        isOpen={showNumpad} 
+                        onClose={() => setShowNumpad(false)} 
+                        onConfirm={handleNumpadConfirm} 
+                    />
+                    
+                    <SetupLeafModal 
+                        isOpen={!!setupNode} 
+                        node={setupNode} 
+                        amount={amount} 
+                        onClose={() => setSetupNode(null)} 
+                        onSave={handleSaveExpense} 
+                    />
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
